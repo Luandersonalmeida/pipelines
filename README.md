@@ -1,3 +1,3 @@
 # pipelines
 
-O arquivo ´cypress-azure-pipelines.yml´
+`cypress-azure-pipelines.yml` contem um Stage de teste  utilizando o Cypress no Azure Devops.
