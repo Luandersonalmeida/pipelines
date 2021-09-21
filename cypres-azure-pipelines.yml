@@ -1,0 +1,29 @@
+trigger:
+- master
+
+variables:
+ vmImageName: ubuntu-latest
+
+stages:
+- stage: Tests
+  displayName: Tests
+  jobs:
+    - job: Tests
+      displayName: Tests
+      pool:
+        vmImage: $(vmImageName)
+      steps:
+      - task: Npm@1
+        inputs:
+          command: 'ci'
+      - task: Npm@1
+        inputs:
+          command: 'custom'
+          customCommand: 'run cypress'
+      - task: PublishTestResults@2
+        inputs:
+          testResultsFormat: 'JUnit'
+          testResultsFiles: '**/TEST-*.xml'
+          searchFolder: '$(System.DefaultWorkingDirectory)/tests'
+          mergeTestResults: true
+          failTaskOnFailedTests: true
