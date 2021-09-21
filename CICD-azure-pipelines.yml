@@ -1,0 +1,141 @@
+trigger:
+- master
+
+variables:
+ pathToProject: '...'
+ pathToTestProject: '...'
+ ResouceGroupName: Nome do grupo de recursos azure
+ WebAppName: Nome do aplicativo web
+ AppServicePlanName: Nome do plano de servico do app
+ vmImageName: ubuntu-latest
+
+stages:
+- stage: Tests
+  displayName: Tests
+  jobs:
+    - job: Tests
+      displayName: Tests
+      pool:
+        vmImage: $(vmImageName)
+      steps:
+      - task: DotNetCoreCLI@2
+        displayName: Running Unit ests
+        inputs:
+          command: 'test'
+          projects: '$(pathToTestProject)'
+
+- stage: Build
+  dependsOn: Tests
+  displayName: Build Application
+  jobs:
+  - job: Build
+    pool:
+        vmImage: $(vmImageName)
+        steps:
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore of Dependencies'
+            inputs:
+              command: 'restore'
+              projects: $(pathToProject)
+              feedsToUse: 'select'
+          - task: DotNetCoreCLI@2
+            displayName: 'Compile Application'
+            inputs:
+              command: 'build'
+              projects: '$(pathToProject)'
+          - task: DotNetCoreCLI@2
+            displayName: 'Generate Artifacts'
+            inputs:
+              command: 'publish'
+              publishWebProjects: false
+              projects: '$(pathToProject)'
+              arguments: '--configuration Release --output $(Build.ArtifactStagingDirectory)'
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              ArtifactName: 'drop'
+              publishLocation: 'Container'
+- stage: ReleaseNotes
+  dependsOn: Build
+  displayName: Generate Release Notes
+  jobs:
+  - job: ReleaseNote
+    pool:
+      vmImage: $(vmImageName)
+      steps:
+          - task: XplatGenerateReleaseNotes@3
+            inputs:
+              outputfile: '$(system.DefaultWorkingDirectory)/ReleaseNote.md'
+              outputVariableName: 'release_wiki_content'
+              templateLocation: 'InLine'
+              inlinetemplate: |
+                # Build {{buildDetails.buildNumber}}
+                
+                
+                # Associated Pull Requests {{pullRequests.length}}
+                {{#forEach pullRequests}} {{#if isFirst}}### Associated Pull Requests  {{/if}}
+                *  **{{this.pullRequestId}}** {{this.title}}
+                {{/forEach}}
+                
+                # Global list of COMMITS ({{commits.length}})
+                {{#forEach commits}}
+                * ** ID{{this.id}}** 
+                  -  **Message:** {{this.message}}
+                  -  **Commited by:** {{this.author.displayName}} 
+                __________________________________________________________________________________
+                {{/forEach}}
+              dumpPayloadToConsole: false
+              dumpPayloadToFile: false
+              replaceFile: true
+              getParentsAndChildren: False
+              getAllParents: False
+              getIndirectPullRequests: False
+              stopOnError: False
+              considerPartiallySuccessfulReleases: False
+          - task: WikiUpdaterTask@1
+            inputs:
+              repo: 'URL do repositório da aplicação'
+              branch: 'develop'
+              filename: 'ReleaseNotes.md'
+              replaceFile: true
+              contents: '$(release_wiki_content)'
+              message: 'New Release Notes'
+              gitname: 'Nome do usuário git'
+              gitemail: 'Email git'
+              useAgentToken: true
+              localpath: '$(System.DefaultWorkingDirectory)\repo'
+
+- stage: Deploy
+  dependsOn:
+  - Build
+  - ReleaseNotes
+  displayName: Deployment Application
+  jobs:
+  - job: Deploy
+    pool:
+      vmImage: $(vmImageName)
+      steps:
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Artfacts'
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'drop'
+              downloadPath: '$(System.ArtifactsDirectory)'
+          - task: AzureCLI@2
+            DisplayName: 'Deploy Webapp on Azure'
+            inputs:
+            azureSubscription: 'Inserir a subscription aqui!!'
+            scriptType: 'pscore'
+            scriptLocation: 'inlineScript'
+            inlineScript: |
+              az appservice plan create --name $(AppServicePlanName) --resource-group $(ResourceGroupName) ---sku s1
+              az webapp create --resource-group $(ResourceGroupName) --plan $(AppServicePlanName) --name $(WebAppName) --runtime
+          - task: AzureRmWebAppDeployment@4
+            displayName: 'Deploy the Artifact to Azure Web App'
+            inputs:
+              ConnectionType: 'AzureRM'
+              AzureSubscription: 'Inserir a subscription aqui!!'
+              appType: 'WebApp'
+              WebAppName: $(WebAppName)
+              packageForLinux: '$(System.ArtifactsDirectory)/**/*.zip'
